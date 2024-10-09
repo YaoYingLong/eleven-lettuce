@@ -65,8 +65,7 @@ class ClusterFutureSyncInvocationHandler<K, V> extends AbstractInvocationHandler
     ClusterFutureSyncInvocationHandler(StatefulConnection<K, V> connection, Class<?> asyncCommandsInterface,
             Class<?> nodeSelectionInterface, Class<?> nodeSelectionCommandsInterface, Object asyncApi) {
         this.connection = connection;
-        this.timeoutProvider = new TimeoutProvider(() -> connection.getOptions().getTimeoutOptions(), () -> connection
-                .getTimeout().toNanos());
+        this.timeoutProvider = new TimeoutProvider(() -> connection.getOptions().getTimeoutOptions(), () -> connection.getTimeout().toNanos());
         this.asyncCommandsInterface = asyncCommandsInterface;
         this.nodeSelectionInterface = nodeSelectionInterface;
         this.nodeSelectionCommandsInterface = nodeSelectionCommandsInterface;
@@ -78,9 +77,7 @@ class ClusterFutureSyncInvocationHandler<K, V> extends AbstractInvocationHandler
      */
     @Override
     protected Object handleInvocation(Object proxy, Method method, Object[] args) throws Throwable {
-
         try {
-
             if (method.isDefault()) {
                 return methodHandleCache.computeIfAbsent(method, ClusterFutureSyncInvocationHandler::lookupDefaultMethod)
                         .bindTo(proxy).invokeWithArguments(args);

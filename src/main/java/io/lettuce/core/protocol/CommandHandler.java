@@ -340,6 +340,8 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
     /**
      * @see io.netty.channel.ChannelDuplexHandler#write(io.netty.channel.ChannelHandlerContext, java.lang.Object,
      *      io.netty.channel.ChannelPromise)
+     *
+     *      该方法时通过DefaultEndpoint中channelWriteAndFlush方法中调用channel.writeAndFlush(command)最终Netty会回调到该方法
      */
     @Override
     @SuppressWarnings("unchecked")
@@ -350,6 +352,7 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
         }
 
         if (msg instanceof RedisCommand) {
+            // 如果是单个的RedisCommand就直接调用writeSingleCommand返回
             writeSingleCommand(ctx, (RedisCommand<?, ?, ?>) msg, promise);
             return;
         }
@@ -359,16 +362,17 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
             List<RedisCommand<?, ?, ?>> batch = (List<RedisCommand<?, ?, ?>>) msg;
 
             if (batch.size() == 1) {
-
+                //如果是单个的RedisCommand就直接调用writeSingleCommand返回
                 writeSingleCommand(ctx, batch.get(0), promise);
                 return;
             }
-
+            // 批量写操作
             writeBatch(ctx, batch, promise);
             return;
         }
 
         if (msg instanceof Collection) {
+            // 批量写操作
             writeBatch(ctx, (Collection<RedisCommand<?, ?, ?>>) msg, promise);
         }
     }
@@ -379,16 +383,17 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
             promise.trySuccess();
             return;
         }
-
+        // 把当前command放入一个特定的栈中，这一步是关键
         addToStack(command, promise);
-
+        // 这里就是Tracer相关的核心逻辑
         if (tracingEnabled && command instanceof CompleteableCommand) {
-
             TracedCommand<?, ?, ?> provider = CommandWrapper.unwrap(command, TracedCommand.class);
+            // 获取设置到clientResources中的Tracer，实际上是OpenTelemetryTracer
             Tracer tracer = clientResources.tracing().getTracerProvider().getTracer();
+            // 这里得到的是OpenTelemetryTraceContext
             TraceContext context = (provider == null ? clientResources.tracing().initialTraceContextProvider() : provider)
                     .getTraceContext();
-
+            // 调用OpenTelemetryTracer的nextSpan方法，从而构建SdkSpanBuilder生成OpenTelemetrySpan
             Tracer.Span span = tracer.nextSpan(context);
             span.name(command.getType().name());
 
@@ -402,9 +407,7 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
 
             CompleteableCommand<?> completeableCommand = (CompleteableCommand<?>) command;
             completeableCommand.onComplete((o, throwable) -> {
-
                 if (command.getOutput() != null) {
-
                     String error = command.getOutput().getError();
                     if (error != null) {
                         span.tag("error", error);
@@ -413,11 +416,11 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
                         span.error(throwable);
                     }
                 }
-
+                // 这里相当于OTel的span.end方法
                 span.finish();
             });
         }
-
+        //调用ChannelHandlerContext把命令真正发送给Redis，当然在发送给Redis之前会由CommandEncoder类对RedisCommand进行编码后写入ByteBuf
         ctx.write(command, promise);
     }
 
@@ -426,7 +429,6 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
         Collection<RedisCommand<?, ?, ?>> deduplicated = new LinkedHashSet<>(batch.size(), 1);
 
         for (RedisCommand<?, ?, ?> command : batch) {
-
             if (isWriteable(command) && !deduplicated.add(command)) {
                 deduplicated.remove(command);
                 command.completeExceptionally(new RedisException(
@@ -459,19 +461,21 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
     private void addToStack(RedisCommand<?, ?, ?> command, ChannelPromise promise) {
 
         try {
-
+            // 再次验证队列是否满了，如果满了就抛出异常
             validateWrite(1);
-
+            // command.getOutput() == null意味这个这个Command不需要Redis返响应。一般不会走这个分支
             if (command.getOutput() == null) {
                 // fire&forget commands are excluded from metrics
                 complete(command);
             }
-
+            // 这个应该是用来做metrics统计用的
             RedisCommand<?, ?, ?> redisCommand = potentiallyWrapLatencyCommand(command);
-
+            // 无论promise是什么类型的，最终都会把command放入到stack中，stack是一个基于数组实现的双向队列
             if (promise.isVoid()) {
+                // 如果promise不是Future类型的就直接把当前command放入到stack
                 stack.add(redisCommand);
             } else {
+                // 如果promise是Future类型的就等future完成后把当前command放入到stack中，当前场景下就是走的这个分支
                 promise.addListener(AddToStack.newInstance(stack, redisCommand));
             }
         } catch (Exception e) {
@@ -528,6 +532,7 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
 
     /**
      * @see io.netty.channel.ChannelInboundHandlerAdapter#channelRead(io.netty.channel.ChannelHandlerContext, java.lang.Object)
+     * 当Netty在收到Redis服务端返回的消息之后会回调当前类的channelRead方法
      */
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
@@ -561,7 +566,7 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
 
             buffer.touch("CommandHandler.read(…)");
             buffer.writeBytes(input);
-
+            // 核心代码
             decode(ctx, buffer);
         } finally {
             input.release();
@@ -569,9 +574,8 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
     }
 
     protected void decode(ChannelHandlerContext ctx, ByteBuf buffer) throws InterruptedException {
-
+        // 如果stack为空，则直接返回，这个时候一般意味着返回的结果找到对应的RedisCommand了
         if (pristine && stack.isEmpty() && buffer.isReadable()) {
-
             if (debugEnabled) {
                 logger.debug("{} Received response without a command context (empty stack)", logPrefix());
             }
@@ -584,7 +588,11 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
         }
 
         while (canDecode(buffer)) {
-
+            // 重点来了。从stack的头上取第一个RedisCommand
+            // 当Lettuce收到 Redis的回复消息时就从stack的头上取第一个RedisCommand，这个RedisCommand就是与该Redis返回结果对应的RedisCommand。
+            // 为什么这样就能对应上呢，是因为Lettuce与Redis之间只有一条tcp连接，在Lettuce端放入stack时是有序的，tcp协议本身是有序的
+            // redis是单线程处理请求的，所以Redis返回的消息也是有序的。这样就能保证Redis中返回的消息一定对应着stack中的第一个RedisCommand
+            // 当然如果连接断开又重连了，这个肯定就对应不上了，Lettuc对断线重连也做了特殊处理，防止对应不上。
             RedisCommand<?, ?, ?> command = stack.peek();
             if (debugEnabled) {
                 logger.debug("{} Stack contains: {} commands", logPrefix(), stack.size());
@@ -593,6 +601,8 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
             pristine = false;
 
             try {
+                // 直接把返回的结果buffer给了stack头上的第一个RedisCommand。
+                // decode操作实际上拿到RedisCommand的CommandOutput对象对Redis的返回结果进行反序列化的
                 if (!decode(ctx, buffer, command)) {
                     discardReadBytesIfNecessary(buffer);
                     return;

@@ -132,15 +132,19 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint {
         LettuceAssert.notNull(command, "Command must not be null");
 
         try {
+            // sharedLock是Lettuce自己实现的一个共享排他锁。incrementWriters相当于获取一个共享锁，当channel状态发生变化的时候，如断开连接时会获取排他锁执行一些清理操作。
             sharedLock.incrementWriters();
-
+            // validateWrite是验证当前操作是否可以执行，Lettuce内部维护了一个保存已经发送但是还没有收到Redis消息的Command的stack
+            // 可以配置这个stack的长度，防止Redis不可用时stack太长导致内存溢出。如果这个stack已经满了，validateWrite会抛出异常
             validateWrite(1);
-
+            // autoFlushCommands默认为true，即每执行一个Redis命令就执行Flush操作发送给Redis，如果设置为false，则需要手动flush
+            // 由于flush操作相对较重，在某些场景下需要继续提升Lettuce的吞吐量可以考虑设置为false。
             if (autoFlushCommands) {
-
                 if (isConnected()) {
+                    // 写入channel并执行flush操作，核心在这个方法的实现中
                     writeToChannelAndFlush(command);
                 } else {
+                    // 如果当前channel连接已经断开就先放入Buffer中，直接返回AsyncCommand，重连之后会把Buffer中的Command再次尝试通过channel发送到Redis中
                     writeToDisconnectedBuffer(command);
                 }
 
@@ -148,6 +152,7 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint {
                 writeToBuffer(command);
             }
         } finally {
+            // 释放共享锁
             sharedLock.decrementWriters();
             if (debugEnabled) {
                 logger.debug("{} write() done", logPrefix());
@@ -276,16 +281,16 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint {
     }
 
     private void writeToChannelAndFlush(RedisCommand<?, ?, ?> command) {
-
+        // QUEUE_SIZE字段做cas  1操作
         QUEUE_SIZE.incrementAndGet(this);
-
+        // 关键代码，最终还是调用了channle的writeAndFlush操作，这个Channel就是netty中的NioSocketChannel
         ChannelFuture channelFuture = channelWriteAndFlush(command);
-
+        // Lettuce的可靠性：保证最多一次。由于Lettuce的保证是基于内存的，所以并不可靠（系统crash时内存数据会丢失）
         if (reliability == Reliability.AT_MOST_ONCE) {
             // cancel on exceptions and remove from queue, because there is no housekeeping
             channelFuture.addListener(AtMostOnceWriteListener.newInstance(this, command));
         }
-
+        // Lettuce的可靠性：保证最少一次。由于Lettuce的保证是基于内存的，所以并不可靠（系统crash时内存数据会丢失）
         if (reliability == Reliability.AT_LEAST_ONCE) {
             // commands are ok to stay within the queue, reconnect will retrigger them
             channelFuture.addListener(RetryListener.newInstance(this, command));
@@ -338,7 +343,7 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint {
         if (debugEnabled) {
             logger.debug("{} write() writeAndFlush command {}", logPrefix(), command);
         }
-
+        // 这个Channel就是netty中的NioSocketChannel，这里最终会回调会回调Bootstrap时配置的CommandHandler的write方法
         return channel.writeAndFlush(command);
     }
 

@@ -463,7 +463,10 @@ public abstract class AbstractRedisAsyncCommands<K, V> implements RedisHashAsync
     }
 
     public <T> AsyncCommand<K, V, T> dispatch(RedisCommand<K, V, T> cmd) {
+        // 用AsyncCommand对RedisCommand做一个包装处理，这个AsyncCommand实现了RedisFuture接口，最后返回给调用方的就是这个对象
+        // 当Lettuce收到Redis的返回结果时会调用AsyncCommand的complete方法，异步的方式返回数据
         AsyncCommand<K, V, T> asyncCommand = new AsyncCommand<>(cmd);
+        // 调用connection的dispatch方法把Command发送给Redis，这个connection就是StatefulRedisConnectionImpl或StatefulRedisClusterConnectionImpl
         RedisCommand<K, V, T> dispatched = connection.dispatch(asyncCommand);
         if (dispatched instanceof AsyncCommand) {
             return (AsyncCommand<K, V, T>) dispatched;

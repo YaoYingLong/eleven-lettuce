@@ -43,6 +43,7 @@ class FutureSyncInvocationHandler extends AbstractInvocationHandler {
         this.connection = connection;
         this.timeoutProvider = new TimeoutProvider(() -> connection.getOptions().getTimeoutOptions(), () -> connection
                 .getTimeout().toNanos());
+        // 这里的asyncApi其实就是调用StatefulRedisConnectionImpl的async方法获得
         this.asyncApi = asyncApi;
         this.translator = MethodTranslator.of(asyncApi.getClass(), interfaces);
     }
@@ -54,8 +55,10 @@ class FutureSyncInvocationHandler extends AbstractInvocationHandler {
         try {
 
             Method targetMethod = this.translator.get(method);
+            // 这里通过反射的方式调用RedisAsyncCommandsImpl的具体的方法，其实最终就是调用AbstractRedisAsyncCommands中提供的方法
             Object result = targetMethod.invoke(asyncApi, args);
 
+            // RedisAsyncCommand返回的大部分对象类型都是RedisFuture类型的
             if (result instanceof RedisFuture<?>) {
 
                 RedisFuture<?> command = (RedisFuture<?>) result;
@@ -63,9 +66,9 @@ class FutureSyncInvocationHandler extends AbstractInvocationHandler {
                 if (isNonTxControlMethod(method.getName()) && isTransactionActive(connection)) {
                     return null;
                 }
-
+                // 获取配置的超时时间
                 long timeout = getTimeoutNs(command);
-
+                // 阻塞的等待RedisFuture返回结果
                 return LettuceFutures.awaitOrCancel(command, timeout, TimeUnit.NANOSECONDS);
             }
 

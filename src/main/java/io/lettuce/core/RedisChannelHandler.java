@@ -166,24 +166,26 @@ public abstract class RedisChannelHandler<K, V> implements Closeable, Connection
     }
 
     protected <T> RedisCommand<K, V, T> dispatch(RedisCommand<K, V, T> cmd) {
-
         if (debugEnabled) {
             logger.debug("dispatching command {}", cmd);
         }
-
+        // 包含tracer相关的代码逻辑，这里其实就是使用TracedCommand将原始命令包了一层
         if (tracingEnabled) {
 
             RedisCommand<K, V, T> commandToSend = cmd;
+            // 一般获取到的provider是为null的
             TraceContextProvider provider = CommandWrapper.unwrap(cmd, TraceContextProvider.class);
 
             if (provider == null) {
+                // 这里如果使用了OTel，这里通过clientResources.tracing()获取到的Tracing其实就是OpenTelemetryTracing
+                // 通过OpenTelemetryTracing得到OpenTelemetryTraceContextProvider从而得到OpenTelemetryTraceContext
                 commandToSend = new TracedCommand<>(cmd, clientResources.tracing()
                         .initialTraceContextProvider().getTraceContext());
             }
-
+            // 其实就是直接调用channelWriter.write方法，而这个channelWriter就是屏蔽底层channel实现的DefaultEndpoint类
             return channelWriter.write(commandToSend);
         }
-
+        // 其实就是直接调用channelWriter.write方法，而这个channelWriter就是屏蔽底层channel实现的DefaultEndpoint类
         return channelWriter.write(cmd);
     }
 
@@ -314,7 +316,9 @@ public abstract class RedisChannelHandler<K, V> implements Closeable, Connection
 
     @SuppressWarnings("unchecked")
     protected <T> T syncHandler(Object asyncApi, Class<?>... interfaces) {
+        // 异步转同步的关键，这里的asyncApi其实就是调用StatefulRedisConnectionImpl的async方法获得
         FutureSyncInvocationHandler h = new FutureSyncInvocationHandler((StatefulConnection<?, ?>) this, asyncApi, interfaces);
+        // 返回一个动态代理类，代理类的实现在FutureSyncInvocationHandler类中
         return (T) Proxy.newProxyInstance(AbstractRedisClient.class.getClassLoader(), interfaces, h);
     }
 

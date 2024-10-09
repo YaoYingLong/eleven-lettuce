@@ -91,6 +91,7 @@ public class StatefulRedisClusterConnectionImpl<K, V> extends RedisChannelHandle
 
     @Override
     public RedisAdvancedClusterCommands<K, V> sync() {
+        // 最终会调用该方法返回RedisAdvancedClusterCommands
         return sync;
     }
 
@@ -218,6 +219,9 @@ public class StatefulRedisClusterConnectionImpl<K, V> extends RedisChannelHandle
 
     @Override
     public <T> RedisCommand<K, V, T> dispatch(RedisCommand<K, V, T> command) {
+        // preProcessCommand对command做预处理，当前主要是根据不同的命令配置一些异步处理
+        // 如：auth命令之后成功之后把password写入到相应变量中，select db操作成功之后把db值写入到相应变量中等等
+        // 调用超类RedisChannelHandler的dispatch方法
         return super.dispatch(preProcessCommand(command));
     }
 

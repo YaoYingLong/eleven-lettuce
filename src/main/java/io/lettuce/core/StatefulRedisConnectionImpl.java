@@ -86,6 +86,7 @@ public class StatefulRedisConnectionImpl<K, V> extends RedisChannelHandler<K, V>
      * @return a new instance
      */
     protected RedisCommands<K, V> newRedisSyncCommandsImpl() {
+        // 这里通过调用async()获取async传入，其实最终就是将同步调用转为异步调用
         return syncHandler(async(), RedisCommands.class, RedisClusterCommands.class);
     }
 
@@ -114,6 +115,7 @@ public class StatefulRedisConnectionImpl<K, V> extends RedisChannelHandler<K, V>
 
     @Override
     public RedisCommands<K, V> sync() {
+        // 最终会调用该方法返回RedisCommands，sync的构建是通过构造方法中调用newRedisSyncCommandsImpl方法完成的
         return sync;
     }
 
@@ -165,9 +167,12 @@ public class StatefulRedisConnectionImpl<K, V> extends RedisChannelHandler<K, V>
     @Override
     public <T> RedisCommand<K, V, T> dispatch(RedisCommand<K, V, T> command) {
 
+        // 对command做预处理，当前主要是根据不同的命令配置一些异步处理
+        // 如：auth命令之后成功之后把password写入到相应变量中，select db操作成功之后把db值写入到相应变量中等等。
         RedisCommand<K, V, T> toSend = preProcessCommand(command);
 
         try {
+            // 调用超类RedisChannelHandler的dispatch方法
             return super.dispatch(toSend);
         } finally {
             if (command.getType().name().equals(MULTI.name())) {
