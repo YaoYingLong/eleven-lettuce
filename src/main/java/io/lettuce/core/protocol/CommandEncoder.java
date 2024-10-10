@@ -69,13 +69,12 @@ public class CommandEncoder extends MessageToByteEncoder<Object> {
     @Override
     @SuppressWarnings("unchecked")
     protected void encode(ChannelHandlerContext ctx, Object msg, ByteBuf out) throws Exception {
-
         out.touch("CommandEncoder.encode(…)");
         if (msg instanceof RedisCommand) {
             RedisCommand<?, ?, ?> command = (RedisCommand<?, ?, ?>) msg;
+            // 这里最终会调用TracedCommand的encode方法
             encode(ctx, out, command);
         }
-
         if (msg instanceof Collection) {
             Collection<RedisCommand<?, ?, ?>> commands = (Collection<RedisCommand<?, ?, ?>>) msg;
             for (RedisCommand<?, ?, ?> command : commands) {
@@ -85,9 +84,9 @@ public class CommandEncoder extends MessageToByteEncoder<Object> {
     }
 
     private void encode(ChannelHandlerContext ctx, ByteBuf out, RedisCommand<?, ?, ?> command) {
-
         try {
             out.markWriterIndex();
+            // 这里最终会调用TracedCommand的encode方法
             command.encode(out);
         } catch (RuntimeException e) {
             out.resetWriterIndex();
