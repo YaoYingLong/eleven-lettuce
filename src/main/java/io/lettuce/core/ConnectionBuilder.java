@@ -77,6 +77,7 @@ public class ConnectionBuilder {
 
         handlers.add(new ChannelGroupListener(channelGroup));
         handlers.add(new CommandEncoder());
+        // 这里的commandHandlerSupplier其实就是CommandHandler
         handlers.add(commandHandlerSupplier.get());
 
         handlers.add(new ConnectionEventTrigger(connectionEvents, connection, clientResources.eventBus()));
@@ -127,6 +128,7 @@ public class ConnectionBuilder {
     }
 
     public RedisChannelInitializer build() {
+        // 这里比较重要的是buildHandlers
         return new PlainChannelInitializer(pingCommandSupplier, this::buildHandlers, clientResources, timeout);
     }
 

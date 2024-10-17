@@ -62,6 +62,8 @@ public class ClusterTopologyRefresh {
      * @param connectTimeout connect timeout
      * @param discovery {@literal true} to discover additional nodes
      * @return mapping between {@link RedisURI} and {@link Partitions}
+     *
+     * 有三个地方法会触发执行REDIS命令
      */
     public Map<RedisURI, Partitions> loadViews(Iterable<RedisURI> seed, Duration connectTimeout, boolean discovery) {
 
@@ -73,13 +75,16 @@ public class ClusterTopologyRefresh {
 
         Connections connections = null;
         try {
+            // 触发执行Redis CLIENT命令，这个地方Context跨线程池传递有问题，应该是因为发起了网络请求处理响应导致跨进程了
             connections = getConnections(seed).get(commandTimeoutNs + connectTimeout.toNanos(), TimeUnit.NANOSECONDS);
 
             if (!isEventLoopActive()) {
                 return Collections.emptyMap();
             }
 
+            // 触发执行Redis CLUSTER命令，这个地方Context跨线程池传递没有问题
             Requests requestedTopology = connections.requestTopology();
+            // 触发执行Redis INFO命令，这个地方Context跨线程池传递没有问题
             Requests requestedClients = connections.requestClients();
 
             NodeTopologyViews nodeSpecificViews = getNodeSpecificViews(requestedTopology, requestedClients, commandTimeoutNs);
@@ -260,7 +265,7 @@ public class ClusterTopologyRefresh {
 
             try {
                 SocketAddress socketAddress = clientResources.socketAddressResolver().resolve(redisURI);
-
+                // 核心代码
                 ConnectionFuture<StatefulRedisConnection<String, String>> connectionFuture = nodeConnectionFactory
                         .connectToNodeAsync(StringCodec.UTF8, socketAddress);
 

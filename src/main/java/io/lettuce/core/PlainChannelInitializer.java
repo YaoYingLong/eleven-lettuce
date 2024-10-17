@@ -121,6 +121,7 @@ class PlainChannelInitializer extends io.netty.channel.ChannelInitializer<Channe
         }
 
         for (ChannelHandler handler : handlers.get()) {
+            // 将CommandHandler添加到pipeline中
             channel.pipeline().addLast(handler);
         }
 

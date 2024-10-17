@@ -496,6 +496,7 @@ public class RedisClusterClient extends AbstractRedisClient {
 
         StatefulRedisConnectionImpl<K, V> connection = new StatefulRedisConnectionImpl<>(writer, codec, timeout);
 
+        // 核心代码
         ConnectionFuture<StatefulRedisConnection<K, V>> connectionFuture = connectStatefulAsync(connection, codec, endpoint,
                 getFirstUri(), socketAddressSupplier, () -> new CommandHandler(clientOptions, clientResources, endpoint));
 
@@ -556,16 +557,13 @@ public class RedisClusterClient extends AbstractRedisClient {
      * @return a new connection
      */
     private <K, V> CompletableFuture<StatefulRedisClusterConnection<K, V>> connectClusterAsync(RedisCodec<K, V> codec) {
-
         if (partitions == null) {
             return Futures.failed(new IllegalStateException(
                     "Partitions not initialized. Initialize via RedisClusterClient.getPartitions()."));
         }
-
+        // 创建周期任务ClusterTopologyRefreshScheduler
         activateTopologyRefreshIfNeeded();
-
         logger.debug("connectCluster(" + initialUris + ")");
-
         Mono<SocketAddress> socketAddressSupplier = getSocketAddressSupplier(TopologyComparators::sortByClientCount);
 
         DefaultEndpoint endpoint = new DefaultEndpoint(clientOptions, clientResources);
@@ -691,6 +689,7 @@ public class RedisClusterClient extends AbstractRedisClient {
             RedisCodec<K, V> codec, DefaultEndpoint endpoint, RedisURI connectionSettings,
             Mono<SocketAddress> socketAddressSupplier, Supplier<CommandHandler> commandHandlerSupplier) {
 
+        // 这里传入的commandHandlerSupplier的是CommandHandler
         ConnectionBuilder connectionBuilder = createConnectionBuilder(connection, endpoint, connectionSettings,
                 socketAddressSupplier, commandHandlerSupplier);
 
@@ -702,6 +701,7 @@ public class RedisClusterClient extends AbstractRedisClient {
             }
         }
 
+        // 核心问题代码是出现在这里
         ConnectionFuture<RedisChannelHandler<K, V>> future = initializeChannelAsync(connectionBuilder);
         ConnectionFuture<?> sync = future;
 
@@ -726,6 +726,7 @@ public class RedisClusterClient extends AbstractRedisClient {
 
         }
 
+        // 最终发送CLIENT命令的地方
         if (LettuceStrings.isNotEmpty(connectionSettings.getClientName())) {
             sync = sync.thenApply(channelHandler -> {
 
@@ -777,11 +778,11 @@ public class RedisClusterClient extends AbstractRedisClient {
     public void reloadPartitions() {
 
         if (partitions == null) {
-            initializePartitions();
+            initializePartitions(); // 核心代码，这里其实也是调用下面的loadPartitions()方法
             partitions.updateCache();
         } else {
 
-            Partitions loadedPartitions = loadPartitions();
+            Partitions loadedPartitions = loadPartitions(); // 核心代码
             if (TopologyComparators.isChanged(getPartitions(), loadedPartitions)) {
 
                 logger.debug("Using a new cluster topology");
@@ -835,7 +836,7 @@ public class RedisClusterClient extends AbstractRedisClient {
         Iterable<RedisURI> topologyRefreshSource = getTopologyRefreshSource();
 
         try {
-            return doLoadPartitions(topologyRefreshSource);
+            return doLoadPartitions(topologyRefreshSource); // 核心代码
         } catch (RedisException e) {
 
             // Attempt recovery using initial seed nodes
@@ -862,6 +863,7 @@ public class RedisClusterClient extends AbstractRedisClient {
 
     private Partitions doLoadPartitions(Iterable<RedisURI> topologyRefreshSource) {
 
+        // 核心代码
         Map<RedisURI, Partitions> partitions = refresh.loadViews(topologyRefreshSource,
                 getClusterClientOptions().getSocketOptions().getConnectTimeout(), useDynamicRefreshSources());
 
@@ -878,7 +880,7 @@ public class RedisClusterClient extends AbstractRedisClient {
                 RedisClusterURIUtil.applyUriConnectionSettings(viewedBy, uri);
             }
         }
-
+        // 这里会判断ClusterTopologyRefreshScheduler是否开启周期执行，若否则开启
         activateTopologyRefreshIfNeeded();
 
         return loadedPartitions;

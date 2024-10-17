@@ -47,7 +47,7 @@ class ClusterTopologyRefreshScheduler implements Runnable, ClusterEventListener 
 
     @Override
     public void run() {
-
+        // 在RedisClusterClient的activateTopologyRefreshIfNeeded中会被开启周期执行
         logger.debug("ClusterTopologyRefreshScheduler.run()");
 
         if (isEventLoopActive() && redisClusterClient.getClusterClientOptions() != null) {
@@ -59,7 +59,7 @@ class ClusterTopologyRefreshScheduler implements Runnable, ClusterEventListener 
             logger.debug("Periodic ClusterTopologyRefresh is disabled");
             return;
         }
-
+        // 再次异步执行ClusterTopologyRefreshTask线程的run方法
         clientResources.eventExecutorGroup().submit(clusterTopologyRefreshTask);
     }
 

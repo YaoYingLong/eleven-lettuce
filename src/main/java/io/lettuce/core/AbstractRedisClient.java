@@ -291,6 +291,7 @@ public abstract class AbstractRedisClient {
                     if (channelReadyFuture.isCancelled()) {
                         return;
                     }
+                    // 问题代码
                     initializeChannelAsync0(connectionBuilder, channelReadyFuture, redisAddress);
                 }, channelReadyFuture::completeExceptionally);
 
@@ -305,6 +306,7 @@ public abstract class AbstractRedisClient {
 
         Bootstrap redisBootstrap = connectionBuilder.bootstrap();
 
+        // 这里是关键代码，build中会创建PlainChannelInitializer
         RedisChannelInitializer initializer = connectionBuilder.build(redisAddress);
         redisBootstrap.handler(initializer);
 
